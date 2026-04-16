@@ -15,32 +15,20 @@ import re
 st.set_page_config(page_title="qPCR 数据分析工作台", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
     <style>
-        /* 紧凑的 RStudio 风格布局 */
-        .block-container { padding-top: 1rem; padding-bottom: 1.5rem; max-width: 98%; }
-        header { visibility: hidden; }
-        
-        /* 侧边栏及工作区背景 */
-        [data-testid="stSidebar"] { background-color: #f8fafc; border-right: 1px solid #e2e8f0; }
-        
-        /* 标签页 (Tabs) 样式优化 */
-        .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid #cbd5e1; }
-        .stTabs [data-baseweb="tab"] { 
-            border-radius: 4px 4px 0 0; 
-            padding: 8px 16px; 
-            background-color: #f1f5f9; 
-            color: #475569; 
-            font-size: 14px;
-            border: 1px solid transparent; 
+        /* 强制全局背景与文字颜色 */
+        .stApp { background-color: #ffffff !important; color: #1e293b !important; }
+        /* 侧边栏样式锁定 */
+        [data-testid="stSidebar"] { background-color: #f1f5f9 !important; border-right: 1px solid #e2e8f0; }
+        /* 强制所有标签为深色 */
+        [data-testid="stSidebar"] .stMarkdown p, [data-testid="stSidebar"] label, 
+        .stMarkdown p, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, label, .stText {
+            color: #0f172a !important; font-weight: 500;
         }
-        .stTabs [aria-selected="true"] { 
-            background-color: #ffffff; 
-            color: #0f172a; 
-            border-top: 3px solid #2563eb; 
-            border-left: 1px solid #cbd5e1; 
-            border-right: 1px solid #cbd5e1; 
-            border-bottom: 1px solid #ffffff; 
-            font-weight: bold;
-        }
+        .stSelectbox, .stTextInput, .stNumberInput { background-color: #ffffff !important; border-radius: 4px; }
+        /* 顶部标签页模拟 RStudio */
+        .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 2px solid #e2e8f0; }
+        .stTabs [data-baseweb="tab"] { border-radius: 6px 6px 0 0; padding: 10px 20px; background-color: #f8fafc !important; color: #64748b !important; border: 1px solid #e2e8f0; }
+        .stTabs [aria-selected="true"] { background-color: #ffffff !important; color: #2563eb !important; border-top: 3px solid #2563eb !important; border-bottom: 2px solid #ffffff !important; font-weight: bold; }
         h3 { padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0; margin-bottom: 1rem; color: #1e293b; font-size: 1.25rem;}
     </style>
 """, unsafe_allow_html=True)
@@ -59,20 +47,15 @@ def get_tukey_letters(tukey, means_s):
 
     sorted_groups = means_s.sort_values(ascending=False).index.astype(str).tolist()
     letters = {g: set() for g in sorted_groups}
-    current_letter = 'a'
-    cliques = []
-    
+    current_letter, cliques = 'a', []
     for g in sorted_groups:
         added = False
         for clique in cliques:
             if all(not is_diff(g, member) for member in clique['members']):
-                clique['members'].add(g)
-                letters[g].add(clique['letter'])
-                added = True
+                clique['members'].add(g); letters[g].add(clique['letter']); added = True
         if not added:
             cliques.append({'letter': current_letter, 'members': {g}})
-            letters[g].add(current_letter)
-            current_letter = chr(ord(current_letter) + 1)
+            letters[g].add(current_letter); current_letter = chr(ord(current_letter) + 1)
     return {g: "".join(sorted(list(ls))) for g, ls in letters.items()}
 
 # ==========================================
@@ -83,11 +66,8 @@ def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_tr
     gene_data = df[df['Gene'] == target_gene].copy()
     if gene_data.empty: return None
 
-    if mode in ["trend", "grouped"]:
-        ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
-    else:
-        ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]
-        gene_data = gene_data[gene_data['Age'].isin(all_groups)]
+    if mode in ["trend", "grouped"]: ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
+    else: ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]; gene_data = gene_data[gene_data['Age'].isin(all_groups)]
 
     ctrl_reps = gene_data[gene_data['Age'] == ctrl_name]['Bio_Rep'].unique()
     if len(ctrl_reps) < k_reps: return None
@@ -141,9 +121,7 @@ def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_tr
     all_scenarios_list.sort(key=lambda x: x['score'])
     final_dfs = []
     for rank, scenario in enumerate(all_scenarios_list[:top_n]):
-        df_rank = scenario['data'].copy()
-        df_rank['Rank'] = rank + 1
-        final_dfs.append(df_rank)
+        df_rank = scenario['data'].copy(); df_rank['Rank'] = rank + 1; final_dfs.append(df_rank)
     return pd.concat(final_dfs)
 
 @st.cache_data 
@@ -151,15 +129,11 @@ def calc_simple_logic(df, target_gene, calc_type, mode, trend_ctrl, paired_ctrl,
     gene_data = df[df['Gene'] == target_gene].copy()
     if gene_data.empty: return None
 
-    if mode in ["trend", "grouped"]:
-        ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
-    else:
-        ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]
-        gene_data = gene_data[gene_data['Age'].isin(all_groups)]
+    if mode in ["trend", "grouped"]: ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
+    else: ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]; gene_data = gene_data[gene_data['Age'].isin(all_groups)]
 
     if calc_type == "raw":
-        res = gene_data.copy()
-        res['Rank'], res['Pairing'] = 0, "Raw Data"
+        res = gene_data.copy(); res['Rank'], res['Pairing'] = 0, "Raw Data"
         return res[['Gene', 'Age', 'Bio_Rep', 'Bio_RelExp', 'Rank', 'Pairing']]
 
     if calc_type == "strict":
@@ -271,12 +245,22 @@ with st.sidebar:
             paired_treat = st.selectbox("实验组:", unique_ages, index=1 if len(unique_ages)>1 else 0)
             ctrl_name = paired_ctrl
     
-    x_rename_dict, x_order = {}, []
+    # 【全局重命名中心】包括坐标轴和图例
+    x_rename_dict, x_order, legend_rename_dict = {}, [], {}
     if dynamic_xs:
-        with st.expander("X轴排序与重命名", expanded=False):
-            x_order = st.multiselect("坐标轴顺序 (拖拽/增删)", options=dynamic_xs, default=dynamic_xs)
+        with st.expander("坐标轴与图例重命名", expanded=False):
+            st.markdown("**X轴定序与重命名**")
+            x_order = st.multiselect("坐标轴物理顺序", options=dynamic_xs, default=dynamic_xs)
             for orig_val in x_order:
-                x_rename_dict[orig_val] = st.text_input(f"'{orig_val}' 重命名为:", value=str(orig_val), key=f"rename_{orig_val}")
+                x_rename_dict[orig_val] = st.text_input(f"X轴 '{orig_val}' 显示为:", value=str(orig_val), key=f"rn_{orig_val}")
+            
+            if work_mode == "grouped":
+                st.markdown("**图例重命名**")
+                for leg_val in all_legs:
+                    legend_rename_dict[leg_val] = st.text_input(f"图例 '{leg_val}' 显示为:", value=str(leg_val), key=f"leg_rn_{leg_val}")
+            else:
+                # 单因素下图例与X轴保持绝对同步
+                legend_rename_dict = x_rename_dict
         
     k_reps = st.slider("保留重复数 (N选K)", 3, 5, 3) if calc_type == "opt" else 3
     run_btn = st.button("运行分析", use_container_width=True, type="primary")
@@ -342,9 +326,15 @@ else:
             else: palette_choice = st.selectbox("预设调色板", ["npg", "aaas", "lancet", "nejm", "jama", "jco", "d3", "igv"])
             
             st.markdown("**几何尺寸**")
-            bar_width, dodge_width = 0.6, 0.8
-            if work_mode == "grouped": dodge_width = st.slider("组间避让间距", 0.2, 1.0, 0.8)
-            else: bar_width = st.slider("柱体宽度", 0.2, 1.0, 0.6)
+            bar_width, dodge_width, inner_gap = 0.6, 0.8, 0.05
+            if work_mode == "grouped":
+                col_w1, col_w2 = st.columns(2)
+                dodge_width = col_w1.slider("组间总间距", 0.2, 1.0, 0.8)
+                inner_gap = col_w2.slider("组内柱子间距", 0.0, 0.5, 0.05)
+            else:
+                bar_width = st.slider("柱体宽度", 0.2, 1.0, 0.6)
+                inner_gap = 0.0
+                
             err_width = st.slider("误差棒顶端宽度", 0.05, 0.5, 0.15)
             err_lwd = st.slider("误差棒粗细", 0.1, 3.0, 1.5)
             
@@ -453,7 +443,11 @@ else:
                     if len(group_data) > 0:
                         mean_val, std_val = group_data.mean(), group_data.std() if len(group_data) > 1 else np.nan
                         x_center = i + (j - (n_hues - 1) / 2) * (current_width / n_hues) if is_grouped else i
-                        ax.bar(x_center, mean_val, width=current_width/n_hues * 0.95 if is_grouped else current_width, color=color_map[hue], edgecolor="black", linewidth=axis_lwd, zorder=2)
+                        
+                        # 【核心改进】计算缩小的柱子宽度，制造 inner_gap 间隙，但中心点保持绝对不变
+                        actual_bar_width = (current_width / n_hues) * (1 - inner_gap) if is_grouped else current_width
+                        
+                        ax.bar(x_center, mean_val, width=actual_bar_width, color=color_map[hue], edgecolor="black", linewidth=axis_lwd, zorder=2)
                         if pd.notna(std_val) and std_val > 0:
                             ax.errorbar(x_center, mean_val, yerr=[[0], [std_val]], capsize=err_width*20, elinewidth=err_lwd, color='black', fmt='none', zorder=4)
                         if show_points:
@@ -462,7 +456,8 @@ else:
                             ax.scatter(x_center + jitter, group_data, facecolors=face_col, edgecolors='black', linewidth=1.2, s=point_size, alpha=point_alpha, zorder=5)
             if show_legend:
                 from matplotlib.patches import Patch
-                legend_elements = [Patch(facecolor=color_map[hue], edgecolor='black', label=hue) for hue in hue_levels]
+                # 【核心改进】图例标签应用重命名映射
+                legend_elements = [Patch(facecolor=color_map[hue], edgecolor='black', label=legend_rename_dict.get(hue, hue)) for hue in hue_levels]
                 ax.legend(handles=legend_elements, **leg_kwargs)
 
         else:
@@ -481,10 +476,13 @@ else:
                                 ax.scatter(treat_x_pos + jitter, group_data, facecolors=face_col, edgecolors='black', linewidth=1.2, s=point_size, alpha=point_alpha, zorder=5)
                 else: sns.stripplot(data=dat, x='PLOT_X', y='PLOT_Y', hue='PLOT_FILL', order=safe_x_order, hue_order=hue_levels, dodge=False, edgecolor="black", linewidth=1.2, size=point_size/5, ax=ax, palette=[face_col]*len(hue_levels), alpha=point_alpha, jitter=jitter_width)
             handles, labels = ax.get_legend_handles_labels()
-            if show_legend and handles: ax.legend(handles[:len(hue_levels)], labels[:len(hue_levels)], **leg_kwargs)
+            if show_legend and handles: 
+                # 【核心改进】非 Bar 模式视图，应用图例重命名映射
+                new_labels = [legend_rename_dict.get(l, l) for l in labels[:len(hue_levels)]]
+                ax.legend(handles[:len(hue_levels)], new_labels, **leg_kwargs)
             elif ax.get_legend(): ax.get_legend().remove()
 
-        # 【防重叠核心层】局部极值寻址算法
+        # 防重叠核心层
         if calc_type != "raw":
             n_hues = len(hue_levels)
             stats_df = dat.groupby(['PLOT_X', 'PLOT_FILL'], observed=True)['PLOT_Y'].agg(['mean', 'std', 'max']).reset_index()
@@ -506,8 +504,6 @@ else:
                                     if treat_hue not in sub_d['PLOT_FILL'].values: continue
                                     treat_x_pos = i + (j - (n_hues - 1) / 2) * (current_width / n_hues)
                                     bar_stat = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==treat_hue)]
-                                    
-                                    # 确保字母位于误差棒的正上方，防止粘连
                                     safe_top = bar_stat['mean'].values[0] + (bar_stat['std'].values[0] if pd.notna(bar_stat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat['max'].values[0]
                                     ax.text(treat_x_pos, safe_top + base_offset, letters_dict.get(str(treat_hue), ""), ha='center', va='bottom', color='black', fontsize=sig_size)
                             except Exception: pass
@@ -516,13 +512,11 @@ else:
                                 ref_hue, treat_hue = hue_levels[0], hue_levels[1]
                                 ref_x_pos, treat_x_pos = i + (0 - (n_hues - 1) / 2) * (current_width / n_hues), i + (1 - (n_hues - 1) / 2) * (current_width / n_hues)
                                 
-                                # 获取参与检验的两根柱子的局部最高点
                                 bar_stat_ref = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==ref_hue)]
                                 bar_stat_treat = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==treat_hue)]
                                 max_ref = bar_stat_ref['mean'].values[0] + (bar_stat_ref['std'].values[0] if pd.notna(bar_stat_ref['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_ref['max'].values[0]
                                 max_treat = bar_stat_treat['mean'].values[0] + (bar_stat_treat['std'].values[0] if pd.notna(bar_stat_treat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_treat['max'].values[0]
                                 
-                                # 以两者中最高的位置作为基准，彻底避免横线横穿柱子
                                 local_max = max(max_ref, max_treat)
                                 stack_y = local_max + base_offset
                                 
@@ -531,7 +525,6 @@ else:
                                     stat, p_val = ttest_ind(g1, g2)
                                     sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
                                     
-                                    # 绘制不重叠连线与星号
                                     ax.plot([ref_x_pos, ref_x_pos, treat_x_pos, treat_x_pos], [stack_y, stack_y+tip, stack_y+tip, stack_y], lw=sig_lwd, c='black')
                                     ax.text((ref_x_pos+treat_x_pos)/2, stack_y+tip + (max_y_overall*0.01), sig, ha='center', va='bottom', color='black', fontsize=sig_size)
                             except Exception: pass
@@ -604,5 +597,7 @@ else:
     st.markdown("---")
     st.markdown("### 数据明细表")
     dat_show = dat.copy()
+    # 【核心改进】数据报表同样继承坐标轴与图例的重命名映射
     dat_show['PLOT_X'] = dat_show['PLOT_X'].map(lambda x: x_rename_dict.get(str(x), str(x)))
+    dat_show['PLOT_FILL'] = dat_show['PLOT_FILL'].map(lambda x: legend_rename_dict.get(str(x), str(x)))
     st.dataframe(dat_show, use_container_width=True)
