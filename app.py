@@ -59,12 +59,12 @@ st.markdown("""
             font-weight: 600; 
         }
 
-        /* 核心逻辑：右侧预览区悬浮 (Sticky) */
+        /* 👑 核心逻辑：右侧预览区完美悬浮 (Sticky)，解除等高拉伸 */
         [data-testid="column"]:nth-of-type(2) {
             position: sticky !important;
             top: 4rem !important; 
+            align-self: flex-start !important; /* 关键核心：解除 Streamlit 列等高拉伸 */
             z-index: 10;
-            height: fit-content;
         }
 
         /* 预览区卡片化包装 */
@@ -96,7 +96,7 @@ st.markdown("""
         h3 { padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0; margin-bottom: 1rem; color: #1e293b; font-size: 1.25rem;}
         .toolbar-text { font-size: 0.85rem; color: #64748b; margin-bottom: 4px; display: block;}
         
-        /* 👑 强制压缩 Quill 富文本编辑器的 iframe，并注入 Material You 美学 */
+        /* 强制压缩 Quill 富文本编辑器的 iframe，并注入 Material You 美学 */
         [data-testid="stElementContainer"] iframe {
             height: 120px !important; /* 强制压缩总高度 */
             border-radius: 16px !important; /* 统一的 MY 大圆角 */
@@ -309,7 +309,7 @@ def prepare_data(file, calc_type, raw_cols):
 with st.sidebar:
     st.markdown("### 数据源")
     uploaded_file = st.file_uploader("上传数据文件 (CSV/Excel)", type=["csv", "xlsx"])
-    calc_type = st.radio("数据处理模式", ["opt", "strict", "raw"], format_func=lambda x: {"opt": "智能寻优", "strict": "严格配对", "raw": "原始数据"}[x])
+    calc_type = st.radio("数据处理模式", ["opt", "智能寻优", "strict", "严格配对", "raw", "原始数据"] if False else ["opt", "strict", "raw"], format_func=lambda x: {"opt": "智能寻优", "strict": "严格配对", "raw": "原始数据"}[x])
     
     raw_cols = {}
     if calc_type == "raw" and uploaded_file:
@@ -436,6 +436,7 @@ else:
         st.markdown("<span class='toolbar-text'><b>图表主标题</b> (回车换行，划选文字加粗/斜体)</span>", unsafe_allow_html=True)
         plot_title_raw = st_quill(placeholder="请输入图表标题 (留空默认基因名)", html=True, toolbar=[["bold", "italic"]], key="quill_title")
         
+        # 👑 独立出画布与坐标轴标签页
         tab_geom, tab_theme, tab_canvas, tab_stats = st.tabs(["图形设置", "文本与排版", "坐标轴与画布", "显著性与图例"])
         
         with tab_geom:
@@ -525,7 +526,7 @@ else:
                 leg_y = col_l4.slider("Y轴坐标", -0.5, 1.5, 0.8)
             else: leg_x, leg_y = 1.05, 0.5
 
-    # ================= Pane 3: 图表渲染区 =================
+    # ================= Pane 2: 图表渲染区 (右侧悬浮) =================
     with col_viewer:
         st.markdown("### 图表预览")
         
@@ -561,7 +562,7 @@ else:
             inner_gap_render = 0.15 if work_mode == "grouped" else inner_gap
             err_direction = "both"
             
-            # 【核心修改点】放开限制，将尺寸变量重新绑定回 UI 的当前输入值
+            # 放开限制，将尺寸变量重新绑定回 UI 的当前输入值
             point_size_render = point_size
             point_alpha_render = point_alpha
             jitter_render = jitter_width
@@ -763,8 +764,8 @@ else:
         y_max_plot = ax.get_ylim()[1]
         ax.set_ylim(0, y_max_plot * (1 + y_top_gap))
 
-        # 导出模块
-        plot_container = st.container()
+        # ================= 导出模块 =================
+        plot_container = st.container(border=True)
         with plot_container:
             st.pyplot(fig)
             st.markdown("###### 导出图表")
