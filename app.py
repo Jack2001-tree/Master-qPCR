@@ -4,8 +4,11 @@ import numpy as np
 from itertools import combinations, permutations
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy.stats import ttest_ind
+import matplotlib.ticker as ticker
+import warnings
+from scipy.stats import ttest_ind, shapiro, levene, mannwhitneyu
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from statsmodels.stats.multitest import multipletests
 import io
 import re
 from streamlit_quill import st_quill
@@ -16,104 +19,40 @@ from streamlit_quill import st_quill
 st.set_page_config(page_title="qPCR 数据分析工作台", layout="wide", initial_sidebar_state="expanded")
 
 # ==========================================
-# 注入 Material You 与 Sticky (吸顶) CSS
+# 注入 Material You 与 究极悬浮 CSS
 # ==========================================
 st.markdown("""
     <style>
-        /* Material You 全局背景与字体色 */
         .stApp { background-color: #F8FAFC !important; color: #1e293b !important; }
-        
-        /* 侧边栏 Material 风格化 */
-        [data-testid="stSidebar"] { 
-            background-color: #EEF2F6 !important; 
-            border-right: none !important; 
-        }
-        
-        /* 原生输入框与选择框的 Material You 大圆角质感 */
+        [data-testid="stSidebar"] { background-color: #EEF2F6 !important; border-right: none !important; }
         .stSelectbox div[data-baseweb="select"], .stTextInput input, .stNumberInput input { 
-            background-color: #ffffff !important; 
-            border-radius: 12px !important; 
-            border: 1px solid #E2E8F0 !important;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+            background-color: #ffffff !important; border-radius: 12px !important; border: 1px solid #E2E8F0 !important; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
         }
-
-        /* Material You 风格的 Tabs */
-        .stTabs [data-baseweb="tab-list"] { 
-            gap: 8px; 
-            border-bottom: none; 
-            background-color: #EEF2F6;
-            padding: 8px;
-            border-radius: 16px;
-        }
-        .stTabs [data-baseweb="tab"] { 
-            border-radius: 12px; 
-            padding: 8px 16px; 
-            background-color: transparent !important; 
-            color: #64748b !important; 
-            border: none; 
-        }
-        .stTabs [aria-selected="true"] { 
-            background-color: #ffffff !important; 
-            color: #0F172A !important; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            font-weight: 600; 
-        }
-
-        /* 👑 核心逻辑：右侧预览区完美悬浮 (Sticky)，解除等高拉伸 */
-        [data-testid="column"]:nth-of-type(2) {
-            position: sticky !important;
-            top: 4rem !important; 
-            align-self: flex-start !important; /* 关键核心：解除 Streamlit 列等高拉伸 */
-            z-index: 10;
-        }
-
-        /* 预览区卡片化包装 */
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; background-color: #EEF2F6; padding: 8px; border-radius: 16px; }
+        .stTabs [data-baseweb="tab"] { border-radius: 12px; padding: 8px 16px; background-color: transparent !important; color: #64748b !important; border: none; }
+        .stTabs [aria-selected="true"] { background-color: #ffffff !important; color: #0F172A !important; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-weight: 600; }
+        [data-testid="column"]:nth-of-type(2) { height: 100% !important; }
         [data-testid="column"]:nth-of-type(2) > div {
-            background-color: #ffffff;
-            border-radius: 24px;
-            padding: 24px;
-            box-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
-            border: 1px solid #F1F5F9;
+            position: sticky !important; top: 2rem !important; max-height: calc(100vh - 4rem) !important; overflow-y: auto !important; 
+            background-color: #ffffff; border-radius: 24px; padding: 24px; box-shadow: 0 8px 32px rgba(15, 23, 42, 0.08); border: 1px solid #F1F5F9; z-index: 10;
         }
-
-        /* Material 药丸形按钮 */
-        .stButton button { 
-            border-radius: 24px !important; 
-            font-weight: 600; 
-            border: none;
-            transition: all 0.2s ease;
-        }
-        .stButton button[kind="primary"] {
-            background-color: #0A56D0 !important;
-            color: white !important;
-        }
-        .stButton button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        
-        /* 标题与辅助文本微调 */
+        [data-testid="column"]:nth-of-type(2) > div::-webkit-scrollbar { width: 6px; }
+        [data-testid="column"]:nth-of-type(2) > div::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 10px; }
+        [data-testid="column"]:nth-of-type(2) > div::-webkit-scrollbar-track { background: transparent; }
+        .stButton button { border-radius: 24px !important; font-weight: 600; border: none; transition: all 0.2s ease; }
+        .stButton button[kind="primary"] { background-color: #0A56D0 !important; color: white !important; }
+        .stButton button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
         h3 { padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0; margin-bottom: 1rem; color: #1e293b; font-size: 1.25rem;}
         .toolbar-text { font-size: 0.85rem; color: #64748b; margin-bottom: 4px; display: block;}
-        
-        /* 强制压缩 Quill 富文本编辑器的 iframe，并注入 Material You 美学 */
         [data-testid="stElementContainer"] iframe {
-            height: 120px !important; /* 强制压缩总高度 */
-            border-radius: 16px !important; /* 统一的 MY 大圆角 */
-            border: 1px solid #E2E8F0 !important;
-            background-color: #ffffff !important;
-            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04) !important;
-            transition: all 0.3s ease;
+            height: 120px !important; border-radius: 16px !important; border: 1px solid #E2E8F0 !important; background-color: #ffffff !important; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04) !important; transition: all 0.3s ease;
         }
-        [data-testid="stElementContainer"] iframe:hover {
-            border-color: #CBD5E1 !important;
-            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
-        }
+        [data-testid="stElementContainer"] iframe:hover { border-color: #CBD5E1 !important; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 0. 显著性字母生成算法 (Tukey HSD)
+# 0. 核心算法工具
 # ==========================================
 def get_tukey_letters(tukey, means_s):
     res = pd.DataFrame(tukey._results_table.data[1:], columns=tukey._results_table.data[0])
@@ -137,60 +76,105 @@ def get_tukey_letters(tukey, means_s):
             letters[g].add(current_letter); current_letter = chr(ord(current_letter) + 1)
     return {g: "".join(sorted(list(ls))) for g, ls in letters.items()}
 
-# ==========================================
-# 0.5 全能富文本解析引擎 (增强防御)
-# ==========================================
-def unified_text_parser(raw_text):
-    if not isinstance(raw_text, str) or not raw_text.strip(): 
-        return ""
-    if raw_text in ["<p><br></p>", "<p></p>"]: 
-        return ""
+def get_letters_from_matrix(groups, reject_matrix, means):
+    sorted_groups = sorted(groups, key=lambda g: means.get(g, 0), reverse=True)
+    letters = {g: set() for g in sorted_groups}; current_letter, cliques = 'a', []
+    def is_diff(g1, g2):
+        if g1 == g2: return False
+        return reject_matrix.get((g1, g2), reject_matrix.get((g2, g1), False))
+    for g in sorted_groups:
+        added = False
+        for clique in cliques:
+            if all(not is_diff(g, member) for member in clique['members']):
+                clique['members'].add(g); letters[g].add(clique['letter']); added = True
+        if not added:
+            cliques.append({'letter': current_letter, 'members': {g}})
+            letters[g].add(current_letter); current_letter = chr(ord(current_letter) + 1)
+    return {g: "".join(sorted(list(ls))) for g, ls in letters.items()}
 
+def perform_2group_test(g1, g2):
+    if len(g1) >= 3 and len(g2) >= 3:
+        _, p_n1 = shapiro(g1); _, p_n2 = shapiro(g2); _, p_l = levene(g1, g2)
+        if p_n1 > 0.05 and p_n2 > 0.05:
+            if p_l > 0.05: _, p = ttest_ind(g1, g2, equal_var=True)
+            else: _, p = ttest_ind(g1, g2, equal_var=False)
+        else: _, p = mannwhitneyu(g1, g2, alternative='two-sided')
+    else: _, p = ttest_ind(g1, g2)
+    return p
+
+def perform_multigroup_test(df, val_col, group_col):
+    groups = df[group_col].dropna().unique(); valid_groups_data = []
+    for g in groups:
+        g_data = df[df[group_col] == g][val_col].dropna().values
+        if len(g_data) > 0: valid_groups_data.append(g_data)
+    if len(valid_groups_data) < 3: return {}
+    normal = True
+    for g_data in valid_groups_data:
+        if len(g_data) >= 3:
+            _, pn = shapiro(g_data)
+            if pn <= 0.05: normal = False
+        else: normal = False
+    homo = True
+    if normal:
+        try:
+            _, pl = levene(*valid_groups_data)
+            if pl <= 0.05: homo = False
+        except: pass
+    if normal and homo:
+        try:
+            tukey = pairwise_tukeyhsd(df[val_col], df[group_col].astype(str))
+            means = df.groupby(group_col, observed=True)[val_col].mean()
+            return get_tukey_letters(tukey, means)
+        except: return {}
+    else:
+        try:
+            reject_matrix = {}; pairs = list(combinations(groups, 2)); pvals = []
+            for g1, g2 in pairs:
+                d1 = df[df[group_col] == g1][val_col].dropna().values
+                d2 = df[df[group_col] == g2][val_col].dropna().values
+                if len(d1)>0 and len(d2)>0: _, p = mannwhitneyu(d1, d2, alternative='two-sided'); pvals.append(p)
+                else: pvals.append(1.0)
+            if pvals:
+                reject, _, _, _ = multipletests(pvals, alpha=0.05, method='fdr_bh')
+                for i, (g1, g2) in enumerate(pairs): reject_matrix[(str(g1), str(g2))] = reject[i]
+            means = df.groupby(group_col, observed=True)[val_col].mean().to_dict()
+            return get_letters_from_matrix([str(g) for g in groups], reject_matrix, means)
+        except: return {}
+
+def unified_text_parser(raw_text):
+    if not isinstance(raw_text, str) or not raw_text.strip(): return ""
+    if raw_text in ["<p><br></p>", "<p></p>"]: return ""
     text = raw_text
     def _math_replace(match, tag):
-        content = match.group(1)
-        content = content.replace('%', r'\%').replace('$', r'\$')
-        content = content.replace(' ', r'\ ')
+        content = match.group(1).replace('%', r'\%').replace('$', r'\$').replace(' ', r'\ ')
         return f'$\\{tag}{{{content}}}$'
-
     text = text.replace("<p><br></p>", "\n").replace("</p><p>", "\n")
     text = text.replace("<p>", "").replace("</p>", "").replace("&nbsp;", " ")
     text = text.replace('\\n', '\n')
-
     text = re.sub(r'<strong><em>(.*?)</em></strong>', lambda m: _math_replace(m, 'mathbfit'), text)
     text = re.sub(r'<em><strong>(.*?)</strong></em>', lambda m: _math_replace(m, 'mathbfit'), text)
     text = re.sub(r'\*\*\*(.*?)\*\*\*', lambda m: _math_replace(m, 'mathbfit'), text)
-
     text = re.sub(r'<strong>(.*?)</strong>', lambda m: _math_replace(m, 'mathbf'), text)
     text = re.sub(r'<em>(.*?)</em>', lambda m: _math_replace(m, 'mathit'), text)
     text = re.sub(r'\*\*(.*?)\*\*', lambda m: _math_replace(m, 'mathbf'), text)
     text = re.sub(r'\*(.*?)\*', lambda m: _math_replace(m, 'mathit'), text)
-
     text = re.sub(r'<[^>]+>', '', text)
     return text.strip()
 
-# ==========================================
-# 1. 核心计算引擎
-# ==========================================
 @st.cache_data 
 def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_treat, top_n, k_reps):
     gene_data = df[df['Gene'] == target_gene].copy()
     if gene_data.empty: return None
-
     if mode in ["trend", "grouped"]: ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
     else: ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]; gene_data = gene_data[gene_data['Age'].isin(all_groups)]
-
     ctrl_reps = gene_data[gene_data['Age'] == ctrl_name]['Bio_Rep'].unique()
     if len(ctrl_reps) < k_reps: return None
-
     ctrl_combos = list(combinations(ctrl_reps, k_reps))
     all_scenarios_list = []
-
     for d0_combo in ctrl_combos:
         d0_base_df = gene_data[(gene_data['Age'] == ctrl_name) & (gene_data['Bio_Rep'].isin(d0_combo))].drop_duplicates(subset=['Bio_Rep', 'Delta_Ct_Mean']).sort_values('Bio_Rep')
         d0_ids, d0_dCts = d0_base_df['Bio_Rep'].tolist(), d0_base_df['Delta_Ct_Mean'].values
         current_scenario_data, current_scenario_score, valid_scenario = [], 0, True
-
         for grp in all_groups:
             age_df = gene_data[gene_data['Age'] == grp]
             if grp == ctrl_name:
@@ -200,8 +184,7 @@ def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_tr
                 res['Bio_RelExp'] = res.groupby('Bio_Rep')['RelExp_Hole'].transform('mean')
                 res['Pairing'] = res['Bio_Rep'].astype(str) + " vs " + res['Bio_Rep'].astype(str)
                 res = res[['Gene', 'Age', 'Bio_Rep', 'Bio_RelExp', 'Pairing']].drop_duplicates()
-                current_scenario_data.append(res)
-                current_scenario_score += res['Bio_RelExp'].std()
+                current_scenario_data.append(res); current_scenario_score += res['Bio_RelExp'].std()
             else:
                 reps_in_age = age_df['Bio_Rep'].unique()
                 if len(reps_in_age) >= k_reps:
@@ -217,17 +200,10 @@ def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_tr
                             current_sd = np.std(rel_exps, ddof=1) 
                             if current_sd < best_age_sd:
                                 best_age_sd = current_sd
-                                best_age_df = pd.DataFrame({
-                                    'Gene': [target_gene]*k_reps, 'Age': [grp]*k_reps, 
-                                    'Bio_Rep': p_ids_list[i], 'Bio_RelExp': rel_exps,
-                                    'Pairing': [f"{p_ids_list[i][j]} vs {d0_ids[j]}" for j in range(k_reps)]
-                                })
-                    current_scenario_data.append(best_age_df)
-                    current_scenario_score += best_age_sd
+                                best_age_df = pd.DataFrame({'Gene': [target_gene]*k_reps, 'Age': [grp]*k_reps, 'Bio_Rep': p_ids_list[i], 'Bio_RelExp': rel_exps, 'Pairing': [f"{p_ids_list[i][j]} vs {d0_ids[j]}" for j in range(k_reps)]})
+                    current_scenario_data.append(best_age_df); current_scenario_score += best_age_sd
                 else: valid_scenario = False
-
         if valid_scenario: all_scenarios_list.append({'key': "_".join(d0_combo), 'score': current_scenario_score, 'data': pd.concat(current_scenario_data)})
-
     if not all_scenarios_list: return None
     all_scenarios_list.sort(key=lambda x: x['score'])
     final_dfs = []
@@ -239,14 +215,11 @@ def process_gene_logic(df, target_gene, mode, trend_ctrl, paired_ctrl, paired_tr
 def calc_simple_logic(df, target_gene, calc_type, mode, trend_ctrl, paired_ctrl, paired_treat):
     gene_data = df[df['Gene'] == target_gene].copy()
     if gene_data.empty: return None
-
     if mode in ["trend", "grouped"]: ctrl_name, all_groups = trend_ctrl, gene_data['Age'].unique()
     else: ctrl_name, all_groups = paired_ctrl, [paired_ctrl, paired_treat]; gene_data = gene_data[gene_data['Age'].isin(all_groups)]
-
     if calc_type == "raw":
         res = gene_data.copy(); res['Rank'], res['Pairing'] = 0, "Raw Data"
         return res[['Gene', 'Age', 'Bio_Rep', 'Bio_RelExp', 'Rank', 'Pairing']]
-
     if calc_type == "strict":
         gene_data_collapsed = gene_data.drop_duplicates(subset=['Age', 'Bio_Rep'])
         ctrl_df = gene_data_collapsed[gene_data_collapsed['Age'] == ctrl_name][['Bio_Rep', 'Delta_Ct_Mean']].rename(columns={'Delta_Ct_Mean': 'Ctrl_dCt'})
@@ -262,9 +235,6 @@ def calc_simple_logic(df, target_gene, calc_type, mode, trend_ctrl, paired_ctrl,
         return None
     return None
 
-# ==========================================
-# 2. 数据解析
-# ==========================================
 def prepare_data(file, calc_type, raw_cols):
     raw_df = pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
     if calc_type == "raw":
@@ -283,7 +253,7 @@ def prepare_data(file, calc_type, raw_cols):
                 if any(k.lower() in col.lower() for k in keys): return col
             return None
         col_s, col_t, col_c = find_col(["Sample", "Name"]), find_col(["Target", "Gene"]), find_col(["CT", "Ct"])
-        if not all([col_s, col_t, col_c]): raise ValueError("数据格式不匹配，缺少必要的 Sample, Target 或 CT 列。")
+        if not all([col_s, col_t, col_c]): raise ValueError("数据格式不匹配。")
         df = raw_df[[col_s, col_t, col_c]].copy()
         df.columns = ['SN', 'TN', 'CTV']
         df['Ct_V'] = pd.to_numeric(df['CTV'], errors='coerce')
@@ -303,13 +273,17 @@ def prepare_data(file, calc_type, raw_cols):
     df['Delta_Ct_Mean'] = df.groupby(['Gene', 'Age', 'Bio_Rep'])['Delta_Ct'].transform('mean')
     return df
 
+# Initialize Session States
+if 'break_ranges' not in st.session_state: st.session_state['break_ranges'] = "10-50"
+if 'segment_ratios' not in st.session_state: st.session_state['segment_ratios'] = "1, 1"
+
 # ==========================================
 # UI 布局: 数据导入与模式配置 (侧边栏)
 # ==========================================
 with st.sidebar:
     st.markdown("### 数据源")
     uploaded_file = st.file_uploader("上传数据文件 (CSV/Excel)", type=["csv", "xlsx"])
-    calc_type = st.radio("数据处理模式", ["opt", "智能寻优", "strict", "严格配对", "raw", "原始数据"] if False else ["opt", "strict", "raw"], format_func=lambda x: {"opt": "智能寻优", "strict": "严格配对", "raw": "原始数据"}[x])
+    calc_type = st.radio("数据处理模式", ["opt", "strict", "raw"], format_func=lambda x: {"opt": "智能寻优", "strict": "严格配对", "raw": "原始数据"}[x])
     
     raw_cols = {}
     if calc_type == "raw" and uploaded_file:
@@ -418,10 +392,7 @@ else:
     results = st.session_state['results']
     col_source, col_viewer = st.columns([1, 2.5], gap="large")
 
-    # ================= Pane 1: 参数配置区 =================
     with col_source:
-        
-        # 👑 样式独立层：置于最上方级全局控制
         st.markdown("### 🌟 全局样式预设")
         preset_style = st.selectbox("一键应用发表级排版", ["自定义", "样式1"], label_visibility="collapsed")
         
@@ -429,14 +400,33 @@ else:
             st.info("💡 已启用「样式1」预设：自动应用粉彩配色、无边框柱体及纯黑实心散点，您仍可自由调节下方各项尺寸与比例。")
             
         st.markdown("---")
-        
         st.markdown("### 图表参数")
         selected_gene = st.selectbox("分析基因", list(results.keys()))
+        
+        # ✨ 预处理绘图数据 (为智能寻断提供上下文)
+        dat = results[selected_gene].copy()
+        if calc_type == "opt": dat = dat[dat['Rank'] == 1]
+        
+        if work_mode == "grouped":
+            dat['PLOT_X'] = dat['Age'].map(lambda x: str(group_mapping.get(x, {}).get('PLOT_X', x)))
+            dat['PLOT_FILL'] = dat['Age'].map(lambda x: str(group_mapping.get(x, {}).get('PLOT_FILL', x)))
+        else: dat['PLOT_X'], dat['PLOT_FILL'] = dat['Age'].astype(str), dat['Age'].astype(str)
+        dat['PLOT_Y'] = dat['Bio_RelExp']
+        dat = dat.dropna(subset=['PLOT_X', 'PLOT_FILL'])
+        
+        safe_x_order = [str(x) for x in x_order if str(x) in dat['PLOT_X'].values]
+        if not safe_x_order: safe_x_order = list(dat['PLOT_X'].unique())
+        
+        hue_levels = list(dat['PLOT_FILL'].unique())
+        if work_mode == "grouped" and group_ref_leg in hue_levels: hue_levels.insert(0, hue_levels.pop(hue_levels.index(group_ref_leg)))
+        
+        dat['PLOT_X'] = pd.Categorical(dat['PLOT_X'], categories=safe_x_order, ordered=True)
+        dat['PLOT_FILL'] = pd.Categorical(dat['PLOT_FILL'], categories=hue_levels, ordered=True)
+        dat = dat.sort_values(['PLOT_X', 'PLOT_FILL'])
         
         st.markdown("<span class='toolbar-text'><b>图表主标题</b> (回车换行，划选文字加粗/斜体)</span>", unsafe_allow_html=True)
         plot_title_raw = st_quill(placeholder="请输入图表标题 (留空默认基因名)", html=True, toolbar=[["bold", "italic"]], key="quill_title")
         
-        # 👑 独立出画布与坐标轴标签页
         tab_geom, tab_theme, tab_canvas, tab_stats = st.tabs(["图形设置", "文本与排版", "坐标轴与画布", "显著性与图例"])
         
         with tab_geom:
@@ -449,7 +439,7 @@ else:
             
             st.markdown("**几何尺寸**")
             col_g1, col_g2 = st.columns(2)
-            bar_edge_col_ui = col_g1.selectbox("柱/箱体边框", ["black", "none"], format_func=lambda x: "黑色" if x == "black" else "无边框 (透明)")
+            bar_edge_col_ui = col_g1.selectbox("柱/箱体边框", ["black", "none", "colored_hollow"], format_func=lambda x: "黑色" if x == "black" else ("空心填色" if x == "colored_hollow" else "无边框 (透明)"))
             err_dir_ui = col_g2.selectbox("误差棒方向", ["up", "both"], format_func=lambda x: "仅向上" if x == "up" else "双向 (上下对称)")
 
             bar_width, dodge_width, inner_gap = 0.6, 0.8, 0.05
@@ -489,6 +479,13 @@ else:
             xtext_size = col_f5.slider("X轴刻度大小", 6, 20, 12)
             ytext_size = col_f6.slider("Y轴刻度大小", 6, 20, 12)
             
+            st.markdown("**标题间距与对齐**")
+            col_f7, col_f8 = st.columns(2)
+            xtitle_loc = col_f7.selectbox("X标题对齐", ["center", "left", "right"])
+            ytitle_loc = col_f8.selectbox("Y标题对齐", ["center", "top", "bottom"])
+            x_label_pad = col_f7.slider("X标题间距", 0, 100, 10)
+            y_label_pad = col_f8.slider("Y标题间距", 0, 100, 35)
+
         with tab_canvas:
             st.markdown("**画布尺寸**")
             col_c1, col_c2 = st.columns(2)
@@ -499,9 +496,61 @@ else:
             x_angle = st.slider("X轴标签旋转角度", 0, 90, 0, step=15)
             axis_lwd = st.slider("坐标轴线粗细", 0.5, 4.0, 1.5)
             y_top_gap = st.slider("Y轴顶部留白比例", 0.05, 0.5, 0.2)
+            
+            st.markdown("---")
+            st.markdown("**多重断轴架构 (Multi-Break)**")
+            use_broken_y = st.checkbox("启用Y轴断轴", False)
+            
+            # ✨ 激进智能寻断引擎
+            if use_broken_y:
+                if st.button("✨ 智能寻断"):
+                    intervals = []
+                    for (px, pfill), grp in dat.groupby(['PLOT_X', 'PLOT_FILL']):
+                        vals = grp['PLOT_Y'].dropna().values
+                        if len(vals) == 0: continue
+                        m = np.mean(vals)
+                        s = np.std(vals, ddof=1) if len(vals)>1 else 0
+                        top_bound = m + s; max_pt = np.max(vals); min_pt = np.min(vals)
+                        highest = max(top_bound, max_pt); lowest = min(m, min_pt)
+                        intervals.append([max(0, lowest * 0.90), highest * 1.25])
+                    
+                    intervals.sort(key=lambda x: x[0])
+                    merged = []
+                    for iv in intervals:
+                        if not merged: merged.append(iv)
+                        else:
+                            prev = merged[-1]
+                            if iv[0] <= prev[1]: prev[1] = max(prev[1], iv[1])
+                            else: merged.append(iv)
+                            
+                    valid_gaps, global_max = [], dat['PLOT_Y'].max()
+                    threshold = global_max * 0.015  
+                    for i in range(len(merged)-1):
+                        g_start, g_end = merged[i][1], merged[i+1][0]
+                        if g_end - g_start > threshold: valid_gaps.append((g_start, g_end))
+                        
+                    if not valid_gaps: st.warning("数据连续，暂未发现合适的断裂带。")
+                    else:
+                        st.session_state['break_ranges'] = ", ".join([f"{g[0]:.1f}-{g[1]:.1f}" for g in valid_gaps])
+                        visible_spans, last_val = [], 0.0
+                        for g_start, g_end in valid_gaps:
+                            visible_spans.append(max(0.1, g_start - last_val)); last_val = g_end
+                        top_max = max(merged[-1][1], global_max * 1.15)
+                        visible_spans.append(max(0.1, top_max - last_val))
+                        visible_spans.reverse()
+                        
+                        min_span = min(visible_spans)
+                        damped_ratios = [(s / min_span) ** 0.4 for s in visible_spans]
+                        st.session_state['segment_ratios'] = ", ".join([str(min(2.5, max(1.0, round(r, 1)))) for r in damped_ratios])
+                        st.rerun()
+
+                break_ranges = st.text_input("断开区间 (如: 10-50, 80-120)", key='break_ranges')
+                segment_ratios = st.text_input("各段高度比 (逗号分隔)", key='segment_ratios')
+                break_slash_size = st.slider("斜杠尺寸", 0.005, 0.050, 0.015, step=0.005)
 
         with tab_stats:
             st.markdown("**检验标识**")
+            sig_format = st.selectbox("显示格式 (针对2组)", ["星号 (***)", "准确P值"])
             col_s1, col_s2 = st.columns(2)
             sig_size = col_s1.slider("字母/星号大小", 8, 25, 14)
             sig_lwd = col_s2.slider("连线粗细", 0.5, 4.0, 1.5)
@@ -511,7 +560,6 @@ else:
             
             st.markdown("**图例配置**")
             show_legend = st.checkbox("显示图例", True)
-            
             st.markdown("<span class='toolbar-text'><b>图例标题</b></span>", unsafe_allow_html=True)
             legend_title_raw = st_quill(placeholder="Condition", html=True, toolbar=[["bold", "italic"]], key="quill_legend")
             
@@ -526,245 +574,285 @@ else:
                 leg_y = col_l4.slider("Y轴坐标", -0.5, 1.5, 0.8)
             else: leg_x, leg_y = 1.05, 0.5
 
-    # ================= Pane 2: 图表渲染区 (右侧悬浮) =================
+    # ================= Pane 2: 图表渲染区 =================
     with col_viewer:
         st.markdown("### 图表预览")
         
-        dat = results[selected_gene].copy()
-        if calc_type == "opt": dat = dat[dat['Rank'] == 1]
-        
-        if work_mode == "grouped":
-            dat['PLOT_X'] = dat['Age'].map(lambda x: str(group_mapping.get(x, {}).get('PLOT_X', x)))
-            dat['PLOT_FILL'] = dat['Age'].map(lambda x: str(group_mapping.get(x, {}).get('PLOT_FILL', x)))
-        else: dat['PLOT_X'], dat['PLOT_FILL'] = dat['Age'].astype(str), dat['Age'].astype(str)
-        dat['PLOT_Y'] = dat['Bio_RelExp']
-        dat = dat.dropna(subset=['PLOT_X', 'PLOT_FILL'])
-        
-        safe_x_order = [str(x) for x in x_order if str(x) in dat['PLOT_X'].values]
-        if not safe_x_order: safe_x_order = list(dat['PLOT_X'].unique())
-        
-        hue_levels = list(dat['PLOT_FILL'].unique())
-        if work_mode == "grouped" and group_ref_leg in hue_levels: hue_levels.insert(0, hue_levels.pop(hue_levels.index(group_ref_leg)))
-            
-        dat['PLOT_X'] = pd.Categorical(dat['PLOT_X'], categories=safe_x_order, ordered=True)
-        dat['PLOT_FILL'] = pd.Categorical(dat['PLOT_FILL'], categories=hue_levels, ordered=True)
-        dat = dat.sort_values(['PLOT_X', 'PLOT_FILL'])
-        
-        # 👑 样式引擎覆盖系统 (Style Override Engine)
         palettes = {"npg": ["#E64B35","#4DBBD5","#00A087","#3C5488","#F39B7F","#8491B4","#91D1C2","#DC0000","#7E6148"], "aaas": ["#3B4992","#EE0000","#008B45","#631879","#008280","#BB0021","#5F559B","#A20056","#808180"], "lancet": ["#00468B","#ED0000","#42B540","#0099B4","#925E9F","#FDAF91","#AD002A","#ADB6B6","#1B1919"], "nejm": ["#BC3C29","#0072B5","#E18727","#20854E","#7876B1","#6F99AD","#FFDC91","#EE4C97"], "jama": ["#374E55","#DF8F44","#00A1D5","#B24745","#79AF97","#6A6599","#80796B"], "jco": ["#0073C2","#EFC000","#868686","#CD534C","#7AA6DC","#003C67","#8F7700","#3B3B3B"], "d3": ["#1F77B4","#FF7F0E","#2CA02C","#D62728","#9467BD","#8C564B","#E377C2","#7F7F7F"], "igv": ["#5050FF","#FF5050","#00BD00","#FFB900","#00D6FF","#B973FF","#006600","#6600CC"], "cell": ["#C2C1D5", "#F6A6A5", "#9ED2C4", "#8BB4D5", "#D8C4E0", "#EED7A1"]}
         
         if preset_style == "样式1":
             final_cols = palettes["cell"]
-            # 视觉组件覆写（保持特有风格）
-            bar_edge_col = "none"
-            point_fill_col_render = "black"
-            point_edge_col = "none"
+            bar_edge_col = "none"; point_fill_col_render = "black"; point_edge_col = "none"
             inner_gap_render = 0.15 if work_mode == "grouped" else inner_gap
             err_direction = "both"
-            
-            # 放开限制，将尺寸变量重新绑定回 UI 的当前输入值
-            point_size_render = point_size
-            point_alpha_render = point_alpha
-            jitter_render = jitter_width
-            font_family_render = font_family
-            title_size_render = title_size
-            xtitle_size_render = xtitle_size
-            ytitle_size_render = ytitle_size
-            xtext_size_render = xtext_size
-            ytext_size_render = ytext_size
-            axis_lwd_render = axis_lwd
-            err_lwd_render = err_lwd
-            err_width_render = err_width
-            sig_lwd_render = sig_lwd
-            sig_size_render = sig_size
-            legend_text_size_render = legend_text_size
-            num_h_render = num_h
-            num_w_render = num_w
+            point_size_render, point_alpha_render, jitter_render = point_size, point_alpha, jitter_width
+            font_family_render, title_size_render, xtitle_size_render, ytitle_size_render, xtext_size_render, ytext_size_render = font_family, title_size, xtitle_size, ytitle_size, xtext_size, ytext_size
+            axis_lwd_render, err_lwd_render, err_width_render, sig_lwd_render, sig_size_render, legend_text_size_render = axis_lwd, err_lwd, err_width, sig_lwd, sig_size, legend_text_size
+            num_h_render, num_w_render = num_h, num_w
         else:
             final_cols = [c.strip() for c in custom_cols.split(',')] if use_custom_cols else palettes[palette_choice]
-            # 自定义模式直通
-            bar_edge_col = bar_edge_col_ui
-            point_fill_col_render = "none" if point_fill_col.lower() == "none" else point_fill_col
+            bar_edge_col = bar_edge_col_ui; point_fill_col_render = "none" if point_fill_col.lower() == "none" else point_fill_col
             point_edge_col = "black" if point_fill_col_render != "none" else "black"
-            inner_gap_render = inner_gap
-            err_direction = err_dir_ui
-            point_size_render = point_size
-            point_alpha_render = point_alpha
-            jitter_render = jitter_width
-            font_family_render = font_family
-            title_size_render = title_size
-            xtitle_size_render = xtitle_size
-            ytitle_size_render = ytitle_size
-            xtext_size_render = xtext_size
-            ytext_size_render = ytext_size
-            axis_lwd_render = axis_lwd
-            err_lwd_render = err_lwd
-            err_width_render = err_width
-            sig_lwd_render = sig_lwd
-            sig_size_render = sig_size
-            legend_text_size_render = legend_text_size
-            num_w_render = num_w
-            num_h_render = num_h
+            inner_gap_render, err_direction = inner_gap, err_dir_ui
+            point_size_render, point_alpha_render, jitter_render = point_size, point_alpha, jitter_width
+            font_family_render, title_size_render, xtitle_size_render, ytitle_size_render, xtext_size_render, ytext_size_render = font_family, title_size, xtitle_size, ytitle_size, xtext_size, ytext_size
+            axis_lwd_render, err_lwd_render, err_width_render, sig_lwd_render, sig_size_render, legend_text_size_render = axis_lwd, err_lwd, err_width, sig_lwd, sig_size, legend_text_size
+            num_w_render, num_h_render = num_w, num_h
             
         color_map = {hue: final_cols[idx % len(final_cols)] for idx, hue in enumerate(hue_levels)}
-
-        leg_kwargs = {"title": unified_text_parser(legend_title_raw) if legend_title_raw else "Condition", "frameon": False, "fontsize": legend_text_size_render, "title_fontsize": legend_text_size_render}
-        if legend_pos == "right": leg_kwargs.update({"loc": "center left", "bbox_to_anchor": (1.02, 0.5)})
-        elif legend_pos == "left": leg_kwargs.update({"loc": "center right", "bbox_to_anchor": (-0.02, 0.5)})
-        elif legend_pos == "top": leg_kwargs.update({"loc": "lower center", "bbox_to_anchor": (0.5, 1.05), "ncol": 4})
-        elif legend_pos == "bottom": leg_kwargs.update({"loc": "upper center", "bbox_to_anchor": (0.5, -0.2), "ncol": 4})
-        elif legend_pos == "custom": leg_kwargs.update({"loc": "center", "bbox_to_anchor": (leg_x, leg_y)})
-
         plt.rcParams['font.family'] = font_family_render
-        fig, ax = plt.subplots(figsize=(num_w_render, num_h_render))
-        
+
+        # ==========================================
+        # 多重断轴环境初始化
+        # ==========================================
+        visible_segments = []
+        if use_broken_y:
+            try:
+                breaks = []
+                for r in break_ranges.split(','):
+                    parts = r.strip().split('-')
+                    if len(parts) == 2: breaks.append((float(parts[0]), float(parts[1])))
+                breaks.sort()
+                stats_temp = dat.groupby(['PLOT_X', 'PLOT_FILL'])['PLOT_Y'].agg(['mean', 'std']).reset_index()
+                raw_max = (stats_temp['mean'] + stats_temp['std']).max() * (1 + y_top_gap)
+                if pd.isna(raw_max): raw_max = dat['PLOT_Y'].max() * (1 + y_top_gap)
+                last_val = 0.0
+                for b_start, b_end in breaks:
+                    if b_start > last_val: visible_segments.append((last_val, b_start))
+                    last_val = b_end
+                if raw_max > last_val: visible_segments.append((last_val, raw_max))
+                visible_segments.reverse()
+            except: use_broken_y = False
+
+        if use_broken_y and len(visible_segments) > 1:
+            n_segs = len(visible_segments)
+            try: ratios = [float(r) for r in segment_ratios.split(',')]
+            except: ratios = [1] * n_segs
+            if len(ratios) < n_segs: ratios.extend([1] * (n_segs - len(ratios)))
+            fig = plt.figure(figsize=(num_w_render, num_h_render))
+            gs = fig.add_gridspec(n_segs, 1, height_ratios=ratios[:n_segs], hspace=0.08)
+            axes = []
+            for i in range(n_segs):
+                ax_tmp = fig.add_subplot(gs[i])
+                ax_tmp.set_facecolor('white')
+                ax_tmp.set_ylim(visible_segments[i])
+                axes.append(ax_tmp)
+            for ax_tmp in axes[:-1]: ax_tmp.tick_params(labelbottom=False, bottom=False)
+            main_ax, title_ax = axes[-1], axes[0]
+            big_ax = fig.add_subplot(gs[:])
+            big_ax.set_facecolor('none')
+            big_ax.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False)
+            for spine in big_ax.spines.values(): spine.set_visible(False)
+            big_ax.set_in_layout(False)
+            legend_ax = big_ax
+        else:
+            fig, main_ax = plt.subplots(figsize=(num_w_render, num_h_render))
+            main_ax.set_facecolor('white')
+            axes = [main_ax]; title_ax = main_ax; legend_ax = main_ax
+
+        # ==========================================
+        # 核心图形渲染 (支持断轴穿越)
+        # ==========================================
         is_grouped = (work_mode == "grouped")
         current_width = dodge_width if is_grouped else bar_width
         
-        # 绘图层
-        if plot_type == "bar":
+        for ax_iter in axes:
             for i, px in enumerate(safe_x_order):
                 sub_d = dat[dat['PLOT_X'] == px]
                 n_hues = len(hue_levels)
                 for j, hue in enumerate(hue_levels):
-                    group_data = sub_d[sub_d['PLOT_FILL'] == hue]['PLOT_Y']
-                    if len(group_data) > 0:
-                        mean_val, std_val = group_data.mean(), group_data.std() if len(group_data) > 1 else np.nan
-                        x_center = i + (j - (n_hues - 1) / 2) * (current_width / n_hues) if is_grouped else i
-                        actual_bar_width = (current_width / n_hues) * (1 - inner_gap_render) if is_grouped else current_width
-                        
-                        ax.bar(x_center, mean_val, width=actual_bar_width, color=color_map[hue], edgecolor=bar_edge_col, linewidth=0 if bar_edge_col=='none' else axis_lwd_render, zorder=2)
-                        
-                        if pd.notna(std_val) and std_val > 0:
-                            yerr_val = std_val if err_direction == "both" else [[0], [std_val]]
-                            ax.errorbar(x_center, mean_val, yerr=yerr_val, capsize=err_width_render*20, elinewidth=err_lwd_render, color='black', fmt='none', zorder=4)
-                            
-                        if show_points:
-                            jitter = np.random.uniform(-jitter_render/2, jitter_render/2, size=len(group_data))
-                            ax.scatter(x_center + jitter, group_data, facecolors=point_fill_col_render, edgecolors=point_edge_col, linewidth=1.2, s=point_size_render, alpha=point_alpha_render, zorder=5)
-            if show_legend:
-                from matplotlib.patches import Patch
-                legend_elements = [Patch(facecolor=color_map[hue], edgecolor='black' if bar_edge_col=='black' else 'none', label=unified_text_parser(legend_rename_dict.get(hue, hue))) for hue in hue_levels]
-                leg = ax.legend(handles=legend_elements, **leg_kwargs)
-                if leg: leg._legend_box.align = legend_title_align
+                    grp_y = sub_d[sub_d['PLOT_FILL'] == hue]['PLOT_Y'].dropna().values
+                    if len(grp_y) == 0: continue
+                    mv = np.mean(grp_y)
+                    sv = np.std(grp_y, ddof=1) if len(grp_y)>1 else 0
+                    
+                    off = (j - (n_hues-1)/2) * (current_width/n_hues) if is_grouped else 0
+                    xc = i + off
+                    bw = (current_width/n_hues)*(1 - inner_gap_render) if is_grouped else current_width
+                    
+                    b_col = "white" if bar_edge_col == 'colored_hollow' else color_map[hue]
+                    e_col = color_map[hue] if bar_edge_col == 'colored_hollow' else ("black" if bar_edge_col=='black' else "none")
+                    lwd = axis_lwd_render if e_col != "none" else 0
+                    line_col = color_map[hue] if e_col == 'none' else e_col
+                    box_edge = b_col if e_col == 'none' else e_col
+                    p_col = color_map[hue] if point_edge_col == 'match' else point_edge_col
 
-        else:
-            if plot_type == "box": sns.boxplot(data=dat, x='PLOT_X', y='PLOT_Y', hue='PLOT_FILL', order=safe_x_order, hue_order=hue_levels, dodge=is_grouped, width=current_width, boxprops={'edgecolor': bar_edge_col, 'linewidth': 0 if bar_edge_col=='none' else axis_lwd_render}, ax=ax, palette=final_cols)
-            else: sns.violinplot(data=dat, x='PLOT_X', y='PLOT_Y', hue='PLOT_FILL', order=safe_x_order, hue_order=hue_levels, dodge=is_grouped, width=current_width, inner="quartile", ax=ax, palette=final_cols)
-            if show_points:
-                if is_grouped:
-                    n_hues = len(hue_levels)
-                    for i, px in enumerate(safe_x_order):
-                        for j, treat_hue in enumerate(hue_levels):
-                            group_data = dat[(dat['PLOT_X'] == px) & (dat['PLOT_FILL'] == treat_hue)]['PLOT_Y']
-                            if len(group_data) > 0:
-                                treat_x_pos = i + (j - (n_hues - 1) / 2) * (current_width / n_hues)
-                                jitter = np.random.uniform(-jitter_render/2, jitter_render/2, size=len(group_data))
-                                ax.scatter(treat_x_pos + jitter, group_data, facecolors=point_fill_col_render, edgecolors=point_edge_col, linewidth=1.2, s=point_size_render, alpha=point_alpha_render, zorder=5)
-                else: sns.stripplot(data=dat, x='PLOT_X', y='PLOT_Y', hue='PLOT_FILL', order=safe_x_order, hue_order=hue_levels, dodge=False, edgecolor=point_edge_col, linewidth=0 if point_edge_col=='none' else 1.2, size=point_size_render/5, ax=ax, palette=[point_fill_col_render]*len(hue_levels), alpha=point_alpha_render, jitter=jitter_render)
-            handles, labels = ax.get_legend_handles_labels()
-            if show_legend and handles: 
-                new_labels = [unified_text_parser(legend_rename_dict.get(l, l)) for l in labels[:len(hue_levels)]]
-                leg = ax.legend(handles[:len(hue_levels)], new_labels, **leg_kwargs)
-                if leg: leg._legend_box.align = legend_title_align
-            elif ax.get_legend(): ax.get_legend().remove()
+                    if plot_type == 'bar':
+                        ax_iter.bar(xc, mv, width=bw, color=b_col, edgecolor=e_col, linewidth=lwd, zorder=2)
+                        if sv > 0:
+                            yerr_val = [[0], [sv]] if err_direction == 'up' else sv
+                            ax_iter.errorbar(xc, mv, yerr=yerr_val, capsize=err_width_render*20, elinewidth=err_lwd_render, color='black', fmt='none', zorder=4)
+                    elif plot_type == 'box':
+                        bp = ax_iter.boxplot([grp_y], positions=[xc], widths=bw, patch_artist=True)
+                        for patch in bp['boxes']:
+                            patch.set_facecolor(b_col); patch.set_edgecolor(box_edge); patch.set_linewidth(lwd if lwd > 0 else 1.5)
+                        for element in ['whiskers', 'caps', 'medians']:
+                            for line in bp[element]: line.set_color(line_col); line.set_linewidth(lwd if lwd > 0 else 1.5)
+                        for flier in bp['fliers']:
+                            flier.set_markeredgecolor(line_col); flier.set_markerfacecolor(b_col)
+                    elif plot_type == 'violin':
+                        if len(grp_y) > 1:
+                            vp = ax_iter.violinplot([grp_y], positions=[xc], widths=bw, showmeans=False, showmedians=False, showextrema=False)
+                            for pc in vp['bodies']:
+                                pc.set_facecolor(b_col); pc.set_edgecolor(box_edge); pc.set_linewidth(lwd if lwd > 0 else 1.5); pc.set_alpha(1.0)
+                            q1, med, q3 = np.percentile(grp_y, [25, 50, 75])
+                            ax_iter.plot([xc, xc], [q1, q3], color=line_col, lw=lwd*2 if lwd>0 else 3.0, zorder=3)
+                            ax_iter.scatter(xc, med, color='white', edgecolor=line_col, s=20, zorder=4)
+                    
+                    if show_points:
+                        jit = np.random.uniform(-jitter_render/2, jitter_render/2, len(grp_y))
+                        ax_iter.scatter(xc + jit, grp_y, facecolors=point_fill_col_render, edgecolors=p_col, s=point_size_render, alpha=point_alpha_render, zorder=5)
 
-        # 防重叠核心层
+        # ==========================================
+        # 智能显著性统计本地映射
+        # ==========================================
+        def get_local_ax_params(val):
+            if not use_broken_y: return axes[0], axes[0].get_ylim()[1] - axes[0].get_ylim()[0]
+            for ax_tmp, (vmin, vmax) in zip(axes, visible_segments):
+                if vmin <= val <= vmax: return ax_tmp, vmax - vmin
+            for ax_tmp, (vmin, vmax) in reversed(list(zip(axes, visible_segments))):
+                if val <= vmax: return ax_tmp, vmax - vmin
+            return axes[0], visible_segments[0][1] - visible_segments[0][0]
+
         if calc_type != "raw":
-            n_hues = len(hue_levels)
             stats_df = dat.groupby(['PLOT_X', 'PLOT_FILL'], observed=True)['PLOT_Y'].agg(['mean', 'std', 'max']).reset_index()
-            max_y_overall = stats_df['mean'].max() + stats_df['std'].max() if plot_type=='bar' else stats_df['max'].max()
-            if pd.isna(max_y_overall): max_y_overall = dat['PLOT_Y'].max()
-            base_offset = max_y_overall * sig_y_offset
-            tip = max_y_overall * sig_tip_len
+            stats_df['std'] = stats_df['std'].fillna(0)
             
+            def get_bar_top(g):
+                if plot_type == 'bar': return np.mean(g) + (np.std(g, ddof=1) if len(g)>1 else 0)
+                else: return np.max(g)
+
             if is_grouped:
                 for i, px in enumerate(safe_x_order):
                     sub_d = dat[dat['PLOT_X'] == px]
-                    if sub_d['PLOT_FILL'].nunique() > 1:
-                        if sub_d['PLOT_FILL'].nunique() > 2: 
-                            try:
-                                tukey = pairwise_tukeyhsd(endog=sub_d['PLOT_Y'], groups=sub_d['PLOT_FILL'], alpha=0.05)
-                                means_s = sub_d.groupby('PLOT_FILL', observed=True)['PLOT_Y'].mean().dropna()
-                                letters_dict = get_tukey_letters(tukey, means_s)
-                                for j, treat_hue in enumerate(hue_levels):
-                                    if treat_hue not in sub_d['PLOT_FILL'].values: continue
-                                    treat_x_pos = i + (j - (n_hues - 1) / 2) * (current_width / n_hues)
-                                    bar_stat = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==treat_hue)]
-                                    safe_top = bar_stat['mean'].values[0] + (bar_stat['std'].values[0] if pd.notna(bar_stat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat['max'].values[0]
-                                    ax.text(treat_x_pos, safe_top + base_offset, letters_dict.get(str(treat_hue), ""), ha='center', va='bottom', color='black', fontsize=sig_size_render)
-                            except Exception: pass
-                        else:
-                            try:
-                                ref_hue, treat_hue = hue_levels[0], hue_levels[1]
-                                ref_x_pos, treat_x_pos = i + (0 - (n_hues - 1) / 2) * (current_width / n_hues), i + (1 - (n_hues - 1) / 2) * (current_width / n_hues)
+                    if sub_d['PLOT_FILL'].nunique() == 2:
+                        h1, h2 = hue_levels[0], hue_levels[1]
+                        g1, g2 = sub_d[sub_d['PLOT_FILL']==h1]['PLOT_Y'].dropna(), sub_d[sub_d['PLOT_FILL']==h2]['PLOT_Y'].dropna()
+                        if len(g1) >= 2 and len(g2) >= 2:
+                            p = perform_2group_test(g1.values, g2.values)
+                            sig = ("p < 0.001" if p < 0.001 else f"p = {p:.3f}") if sig_format == '准确P值' else ("***" if p<0.001 else "**" if p<0.01 else "*" if p<0.05 else "ns")
+                            x1 = i + (0 - 0.5) * (current_width/2)
+                            x2 = i + (1 - 0.5) * (current_width/2)
+                            m1, m2 = get_bar_top(g1), get_bar_top(g2)
+                            
+                            t_ax, y_span = get_local_ax_params(max(m1, m2))
+                            base_off = y_span * sig_y_offset
+                            tip = y_span * sig_tip_len
+                            sy = max(m1, m2) + base_off
+                            
+                            t_ax.plot([x1, x1, x2, x2], [sy, sy+tip, sy+tip, sy], color='black', lw=sig_lwd_render, clip_on=False)
+                            t_ax.text((x1+x2)/2, sy+tip + (y_span*0.01), sig, ha='center', va='bottom', fontsize=sig_size_render, clip_on=False)
                                 
-                                bar_stat_ref = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==ref_hue)]
-                                bar_stat_treat = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==treat_hue)]
-                                max_ref = bar_stat_ref['mean'].values[0] + (bar_stat_ref['std'].values[0] if pd.notna(bar_stat_ref['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_ref['max'].values[0]
-                                max_treat = bar_stat_treat['mean'].values[0] + (bar_stat_treat['std'].values[0] if pd.notna(bar_stat_treat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_treat['max'].values[0]
-                                
-                                local_max = max(max_ref, max_treat)
-                                stack_y = local_max + base_offset
-                                
-                                g1, g2 = sub_d[sub_d['PLOT_FILL'] == ref_hue]['PLOT_Y'], sub_d[sub_d['PLOT_FILL'] == treat_hue]['PLOT_Y']
-                                if len(g1)>1 and len(g2)>1:
-                                    stat, p_val = ttest_ind(g1, g2)
-                                    sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
-                                    
-                                    ax.plot([ref_x_pos, ref_x_pos, treat_x_pos, treat_x_pos], [stack_y, stack_y+tip, stack_y+tip, stack_y], lw=sig_lwd_render, c='black')
-                                    ax.text((ref_x_pos+treat_x_pos)/2, stack_y+tip + (max_y_overall*0.01), sig, ha='center', va='bottom', color='black', fontsize=sig_size_render)
-                            except Exception: pass
-            else: 
+                    elif sub_d['PLOT_FILL'].nunique() > 2:
+                        lets = perform_multigroup_test(sub_d, 'PLOT_Y', 'PLOT_FILL')
+                        for j, thue in enumerate(hue_levels):
+                            if thue not in sub_d['PLOT_FILL'].values: continue
+                            tx = i + (j - (n_hues - 1)/2) * (current_width/n_hues)
+                            bar = stats_df[(stats_df['PLOT_X']==px) & (stats_df['PLOT_FILL']==thue)]
+                            mx = bar['mean'].values[0] + bar['std'].values[0] if plot_type == 'bar' else bar['max'].values[0]
+                            t_ax, y_span = get_local_ax_params(mx)
+                            sy = mx + y_span * sig_y_offset
+                            t_ax.text(tx, sy, lets.get(str(thue), ""), ha='center', va='bottom', fontsize=sig_size_render, clip_on=False)
+            else:
                 if len(safe_x_order) > 2:
-                    try:
-                        tukey = pairwise_tukeyhsd(endog=dat['PLOT_Y'], groups=dat['PLOT_X'], alpha=0.05)
-                        means_s = dat.groupby('PLOT_X', observed=True)['PLOT_Y'].mean().dropna()
-                        letters_dict = get_tukey_letters(tukey, means_s)
-                        for i, px in enumerate(safe_x_order):
-                            bar_stat = stats_df[stats_df['PLOT_X']==px]
-                            safe_top = bar_stat['mean'].values[0] + (bar_stat['std'].values[0] if pd.notna(bar_stat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat['max'].values[0]
-                            ax.text(i, safe_top + base_offset, letters_dict.get(str(px), ""), ha='center', va='bottom', color='black', fontsize=sig_size_render)
-                    except Exception: pass
+                    lets = perform_multigroup_test(dat, 'PLOT_Y', 'PLOT_X')
+                    for i, px in enumerate(safe_x_order):
+                        bar = stats_df[stats_df['PLOT_X']==px]
+                        mx = bar['mean'].values[0] + bar['std'].values[0] if plot_type == 'bar' else bar['max'].values[0]
+                        t_ax, y_span = get_local_ax_params(mx)
+                        sy = mx + y_span * sig_y_offset
+                        t_ax.text(i, sy, lets.get(str(px), ""), ha='center', va='bottom', fontsize=sig_size_render, clip_on=False)
                 elif len(safe_x_order) == 2:
-                    try:
-                        g1, g2 = dat[dat['PLOT_X'] == safe_x_order[0]]['PLOT_Y'], dat[dat['PLOT_X'] == safe_x_order[1]]['PLOT_Y']
-                        bar_stat_ref = stats_df[stats_df['PLOT_X']==safe_x_order[0]]
-                        bar_stat_treat = stats_df[stats_df['PLOT_X']==safe_x_order[1]]
-                        max_ref = bar_stat_ref['mean'].values[0] + (bar_stat_ref['std'].values[0] if pd.notna(bar_stat_ref['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_ref['max'].values[0]
-                        max_treat = bar_stat_treat['mean'].values[0] + (bar_stat_treat['std'].values[0] if pd.notna(bar_stat_treat['std'].values[0]) else 0) if plot_type == 'bar' else bar_stat_treat['max'].values[0]
-                        local_max = max(max_ref, max_treat)
+                    g1, g2 = dat[dat['PLOT_X']==safe_x_order[0]]['PLOT_Y'].dropna(), dat[dat['PLOT_X']==safe_x_order[1]]['PLOT_Y'].dropna()
+                    if len(g1) >= 2 and len(g2) >= 2:
+                        p = perform_2group_test(g1.values, g2.values)
+                        sig = ("p < 0.001" if p < 0.001 else f"p = {p:.3f}") if sig_format == '准确P值' else ("***" if p<0.001 else "**" if p<0.01 else "*" if p<0.05 else "ns")
+                        m1, m2 = get_bar_top(g1), get_bar_top(g2)
+                        t_ax, y_span = get_local_ax_params(max(m1, m2))
+                        base_off = y_span * sig_y_offset
+                        tip = y_span * sig_tip_len
+                        sy = max(m1, m2) + base_off
                         
-                        if len(g1)>1 and len(g2)>1:
-                            stat, p_val = ttest_ind(g1, g2)
-                            sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
-                            stack_y = local_max + base_offset
-                            ax.plot([0, 0, 1, 1], [stack_y, stack_y+tip, stack_y+tip, stack_y], lw=sig_lwd_render, c='black')
-                            ax.text(0.5, stack_y+tip + (max_y_overall*0.01), sig, ha='center', va='bottom', color='black', fontsize=sig_size_render)
-                    except Exception: pass
+                        t_ax.plot([0, 0, 1, 1], [sy, sy+tip, sy+tip, sy], color='black', lw=sig_lwd_render, clip_on=False)
+                        t_ax.text(0.5, sy+tip + (y_span*0.01), sig, ha='center', va='bottom', fontsize=sig_size_render, clip_on=False)
 
-        # 图表坐标与边框美化 
-        parsed_title = unified_text_parser(plot_title_raw)
-        final_title = parsed_title if parsed_title else selected_gene
-        ax.set_title(final_title, pad=20, fontsize=title_size_render, loc='center', fontstyle=title_style if title_style!='bold' else 'normal', fontweight='bold' if title_style=='bold' else 'normal')
-        
-        ax.set_xlabel(unified_text_parser(xlab_raw) if xlab_raw else "Groups", fontsize=xtitle_size_render)
-        ax.set_ylabel(unified_text_parser(ylab_raw) if ylab_raw else "Relative Expression", fontsize=ytitle_size_render)
-        
-        final_x_labels = [unified_text_parser(x_rename_dict.get(orig_x, orig_x)) for orig_x in safe_x_order]
-        ax.set_xticks(range(len(safe_x_order)))
-        if x_angle > 0: ax.set_xticklabels(final_x_labels, rotation=x_angle, ha="right", rotation_mode="anchor", fontsize=xtext_size_render)
-        else: ax.set_xticklabels(final_x_labels, rotation=0, ha="center", fontsize=xtext_size_render)
+        # ==========================================
+        # 坐标轴清洗与标签对齐
+        # ==========================================
+        for ax_idx, ax_iter in enumerate(axes):
+            if len(safe_x_order) > 0: ax_iter.set_xlim(-0.5, len(safe_x_order) - 0.5)
             
-        ax.tick_params(axis='y', labelsize=ytext_size_render)
-        sns.despine()
-        ax.spines['bottom'].set_linewidth(axis_lwd_render)
-        ax.spines['left'].set_linewidth(axis_lwd_render)
-        ax.tick_params(width=axis_lwd_render)
-        y_max_plot = ax.get_ylim()[1]
-        ax.set_ylim(0, y_max_plot * (1 + y_top_gap))
+            if use_broken_y:
+                n_ticks = 5 if ratios[ax_idx] >= 1.8 else 3
+                if ax_idx == 0: ax_iter.yaxis.set_major_locator(ticker.MaxNLocator(nbins=n_ticks, prune='lower', min_n_ticks=2))
+                elif ax_idx == len(axes)-1: ax_iter.yaxis.set_major_locator(ticker.MaxNLocator(nbins=n_ticks, prune='upper', min_n_ticks=2))
+                else: ax_iter.yaxis.set_major_locator(ticker.MaxNLocator(nbins=n_ticks, prune='both', min_n_ticks=2))
+            else:
+                ax_iter.yaxis.set_major_locator(ticker.MaxNLocator(nbins=6))
+            
+            ax_iter.tick_params(axis='both', width=axis_lwd_render, labelsize=ytext_size_render)
+            ax_iter.spines['left'].set_linewidth(axis_lwd_render)
+            ax_iter.spines['bottom'].set_linewidth(axis_lwd_render)
+            
+            ax_iter.spines['top'].set_visible(False)
+            ax_iter.spines['right'].set_visible(False)
+            if use_broken_y and ax_idx < len(axes) - 1:
+                ax_iter.spines['bottom'].set_visible(False)
+                ax_iter.tick_params(bottom=False)
 
-        # ================= 导出模块 =================
+        final_x_labels = [unified_text_parser(x_rename_dict.get(orig_x, orig_x)) for orig_x in safe_x_order]
+        main_ax.set_xticks(range(len(safe_x_order)))
+        if x_angle > 0: main_ax.set_xticklabels(final_x_labels, rotation=x_angle, ha="right", rotation_mode="anchor", fontsize=xtext_size_render)
+        else: main_ax.set_xticklabels(final_x_labels, rotation=0, ha="center", fontsize=xtext_size_render)
+
+        parsed_title = unified_text_parser(plot_title_raw)
+        title_ax.set_title(parsed_title if parsed_title else selected_gene, pad=20, fontsize=title_size_render, loc='center', fontstyle=title_style if title_style!='bold' else 'normal', fontweight='bold' if title_style=='bold' else 'normal')
+        main_ax.set_xlabel(unified_text_parser(xlab_raw) if xlab_raw else "Groups", fontsize=xtitle_size_render, loc=xtitle_loc, labelpad=x_label_pad)
+        legend_ax.set_ylabel(unified_text_parser(ylab_raw) if ylab_raw else "Relative Expression", fontsize=ytitle_size_render, loc=ytitle_loc, labelpad=y_label_pad)
+
+        if not use_broken_y:
+            main_ax.set_ylim(0, main_ax.get_ylim()[1] * (1 + y_top_gap))
+            sns.despine(ax=main_ax)
+
+        # ==========================================
+        # 图例与最终定稿渲染
+        # ==========================================
+        if show_legend:
+            try:
+                from matplotlib.patches import Patch; from matplotlib.lines import Line2D
+                if bar_edge_col == 'colored_hollow': legs = [Line2D([0],[0], marker='o', color='w', label=unified_text_parser(legend_rename_dict.get(h, h)), markerfacecolor='w', markeredgecolor=color_map[h], markersize=10, markeredgewidth=1.5) for h in hue_levels]
+                else: legs = [Patch(facecolor=color_map[h], edgecolor='black' if bar_edge_col=='black' else 'none', label=unified_text_parser(legend_rename_dict.get(h, h))) for h in hue_levels]
+                
+                leg_kwargs = {"title": unified_text_parser(legend_title_raw) if legend_title_raw else "Condition", "frameon": False, "fontsize": legend_text_size_render, "title_fontsize": legend_text_size_render}
+                loc_map = {'right': 'center left', 'top': 'lower center', 'bottom': 'upper center', 'left': 'center right', 'custom': 'center'}
+                bbox_map = {'right': (1.02, 0.5), 'top': (0.5, 1.05), 'bottom': (0.5, -0.2), 'left': (-0.02, 0.5), 'custom': (leg_x, leg_y)}
+                
+                lg = legend_ax.legend(handles=legs, loc=loc_map[legend_pos], bbox_to_anchor=bbox_map[legend_pos], ncol=1 if legend_pos in ['right', 'left', 'custom'] else 4, **leg_kwargs)
+                if lg: lg._legend_box.align = legend_title_align
+            except Exception: pass
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fig.tight_layout()
+        if use_broken_y: fig.subplots_adjust(left=0.18)
+
+        # ✨ 终极斜杠防畸变渲染
+        if use_broken_y:
+            dx = break_slash_size
+            fw, fh = fig.get_size_inches() 
+            for i in range(len(axes)-1):
+                pos_top = axes[i].get_position()
+                pos_bot = axes[i+1].get_position()
+                w_top, h_top = pos_top.width * fw, pos_top.height * fh
+                w_bot, h_bot = pos_bot.width * fw, pos_bot.height * fh
+                
+                dy_top = (dx * w_top * 1.5) / h_top if h_top > 0 else dx
+                dy_bot = (dx * w_bot * 1.5) / h_bot if h_bot > 0 else dx
+                
+                kwargs = dict(color='black', clip_on=False, lw=axis_lwd_render)
+                axes[i].plot([-dx, +dx], [-dy_top, +dy_top], transform=axes[i].transAxes, **kwargs) 
+                axes[i+1].plot([-dx, +dx], [1-dy_bot, 1+dy_bot], transform=axes[i+1].transAxes, **kwargs)
+
         plot_container = st.container(border=True)
         with plot_container:
             st.pyplot(fig)
@@ -783,7 +871,6 @@ else:
             fig.savefig(buf_svg, format="svg", bbox_inches='tight')
             col_d3.download_button("SVG (矢量)", buf_svg.getvalue(), f"{selected_gene}_Plot.svg", "image/svg+xml", use_container_width=True)
 
-    # ================= Pane 4: 数据明细 =================
     st.markdown("---")
     st.markdown("### 数据明细表")
     dat_show = dat.copy()
